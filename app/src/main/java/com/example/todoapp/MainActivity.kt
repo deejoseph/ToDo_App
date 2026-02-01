@@ -24,6 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,7 +97,12 @@ fun TodoInputScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            // 预留底部空间，确保底部的项在动画时已预加载
+            contentPadding = PaddingValues(bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             items(items = todoList, key = { it.id }) { item ->
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { false },
@@ -111,18 +118,22 @@ fun TodoInputScreen() {
                 val isTargetingDismiss = dismissState.targetValue != SwipeToDismissBoxValue.Settled
                 val isConfirming = itemPendingDelete == item
 
+                // 淡出动画
                 val finalAlpha by animateFloatAsState(
                     targetValue = if (item.isDeleting) 0f else 1f,
                     animationSpec = tween(durationMillis = 500),
                     label = "FinalFadeOut",
                     finishedListener = {
-                        if (item.isDeleting) { todoList.remove(item) }
+                        if (item.isDeleting) {
+                            todoList.remove(item)
+                        }
                     }
                 )
 
+                // 位移动画
                 val extraTranslation by animateFloatAsState(
                     targetValue = if (isConfirming || isTargetingDismiss) {
-                        val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else -1f)
+                        val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f)
                         2000f * dir
                     } else 0f,
                     animationSpec = tween(600, easing = FastOutLinearInEasing),
@@ -147,7 +158,12 @@ fun TodoInputScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .animateItem(
-                            placementSpec = tween(durationMillis = 400),
+                            placementSpec = spring(
+                                // 修正：这里通常是 DampingRatioNoBouncy (有 y)
+                                // 或者直接写 1f 代表完全没有弹跳
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
                             fadeOutSpec = null
                         )
                 ) {
