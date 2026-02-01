@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,9 +17,13 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
 import kotlin.math.absoluteValue
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.draw.clip
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,11 +37,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class TodoItem(
+    val id: Long = System.currentTimeMillis() + (0..9999).random(), // 随机且唯一的ID
+    val taskName: String,
+    val isDone: Boolean
+)
+
 @Composable
 fun TodoInputScreen() {
     var textState by remember { mutableStateOf("") }
     // 使用 mutableStateListOf，这样当列表改变时，界面会自动刷新
-    val todoList = remember { mutableStateListOf<Pair<String, Boolean>>() }
+    // 现在列表里存的是 TodoItem 对象，而不仅仅是字符串
+    val todoList = remember { mutableStateListOf<TodoItem>() }
 
     Column(
         modifier = Modifier
@@ -58,9 +70,9 @@ fun TodoInputScreen() {
             FilledIconButton(
                 onClick = {
                     if (textState.isNotBlank()) {
-                        // 添加一个 Pair，保存 任务内容 和 完成状态(默认false)
-                        todoList.add(textState to false)
-                        textState = ""
+                        // 创建一个新的 TodoItem 对象并添加
+                        todoList.add(TodoItem(taskName = textState, isDone = false))
+                        textState = "" // 清空输入框
                     }
                 },
                 modifier = Modifier.size(56.dp)
@@ -72,30 +84,29 @@ fun TodoInputScreen() {
         Spacer(modifier = Modifier.height(16.dp))
 
         // --- 下方列表区域 ---
-        // LazyColumn 相当于传统的 RecyclerView
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(
                 items = todoList,
-                // 关键点：提供一个唯一的 key，这样删除动画才不会乱
-                key = { it.first + todoList.indexOf(it) }
-            ) { todoPair ->
-                // 1. 定义滑动状态
+                // 【关键修复 1】使用唯一的 id 作为 Key，防止状态复用导致的自动删除
+                key = { it.id }
+            ) { item ->
+                // 为每一个 Item 创建独立的状态
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
-                        // 核心修复：必须同时允许这两个值
-                        if (value == SwipeToDismissBoxValue.StartToEnd ||
-                            value == SwipeToDismissBoxValue.EndToStart) {
-                            todoList.remove(todoPair)
-                            true // 返回 true 表示确认删除，不再弹回
+                        if (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart) {
+                            // 【关键修复 2】直接在这里删除，利用 Compose 的自动动画
+                            todoList.remove(item)
+                            true
                         } else {
                             false
                         }
                     }
                 )
 
+                val cardShape = RoundedCornerShape(12.dp)
                 // 2. 滑动包装器
                 SwipeToDismissBox(
                     state = dismissState,
@@ -131,35 +142,46 @@ fun TodoInputScreen() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Red.copy(alpha = enhancedAlpha * 0.9f))
-                                .padding(horizontal = 24.dp),
-                            contentAlignment = alignment
+                                .padding(vertical = 4.dp) // 1. 必须与下方 Card 的 vertical padding 一致
+                                .clip(cardShape)           // 2. 裁剪背景，使其拥有和 Card 一样的圆角
+                                .background(Color.Red.copy(alpha = enhancedAlpha * 0.9f)),
+                            contentAlignment = when (direction) {
+                                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                                else -> Alignment.Center
+                            }
                         ) {
                             if (isSwiping) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
-                                    contentDescription = "删除",
+                                    contentDescription = null,
                                     tint = Color.White.copy(alpha = enhancedAlpha),
-                                    modifier = Modifier.graphicsLayer {
-                                        scaleX = iconScale
-                                        scaleY = iconScale
-                                    }
+                                    modifier = Modifier
+                                        .padding(horizontal = 24.dp)
+                                        .graphicsLayer {
+                                            val scale = (0.5f + (enhancedAlpha * 0.6f)).coerceIn(0.5f, 1.1f)
+                                            scaleX = scale
+                                            scaleY = scale
+                                        }
                                 )
                             }
                         }
                     },
                     // 关键修改：允许从左向右滑动
                     enableDismissFromStartToEnd = true,
-                    // 允许从右向左滑动
                     enableDismissFromEndToStart = true,
                     content = {
-                        // 之前的任务行 UI
+                        // 调用你之前的卡片组件
                         TodoItemRow(
-                            taskName = todoPair.first,
-                            isDone = todoPair.second,
+                            taskName = item.taskName,
+                            isDone = item.isDone,
+                            shape = cardShape, // 记得你之前定义的圆角
                             onStatusChange = { checked ->
-                                val index = todoList.indexOf(todoPair)
-                                todoList[index] = todoPair.first to checked
+                                // 更新勾选状态
+                                val index = todoList.indexOf(item)
+                                if (index != -1) {
+                                    todoList[index] = item.copy(isDone = checked)
+                                }
                             }
                         )
                     }
@@ -171,11 +193,12 @@ fun TodoInputScreen() {
 
 // 抽取出来的一个单独的“行”组件
 @Composable
-fun TodoItemRow(taskName: String, isDone: Boolean, onStatusChange: (Boolean) -> Unit) {
+fun TodoItemRow(taskName: String, isDone: Boolean, shape: Shape, onStatusChange: (Boolean) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp), // 增加上下间距
+        shape = shape, // <--- 确保 Card 使用了传入的 shape
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
