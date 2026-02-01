@@ -211,7 +211,13 @@ fun TodoInputScreen() {
                                 taskName = item.taskName,
                                 isDone = item.isDone,
                                 shape = cardShape,
-                                onStatusChange = { /* ... */ }
+                                onStatusChange = { newStatus ->
+                                    // 找到当前 item 在列表中的索引并更新它
+                                    val index = todoList.indexOf(item)
+                                    if (index != -1) {
+                                        todoList[index] = item.copy(isDone = newStatus)
+                                    }
+                                }
                             )
                         }
                     }
