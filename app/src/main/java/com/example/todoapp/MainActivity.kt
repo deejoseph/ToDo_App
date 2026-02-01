@@ -88,25 +88,35 @@ fun TodoInputScreen() {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(
-                items = todoList,
-                // 【关键修复 1】使用唯一的 id 作为 Key，防止状态复用导致的自动删除
-                key = { it.id }
-            ) { item ->
+            items(items = todoList, key = { it.id })
+            { item ->
                 // 为每一个 Item 创建独立的状态
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
-                        // 只要滑动到了两端，就返回 true，这会触发“滑到底”的动画
+                        // 只有当滑动意图非常明确（已经到达目标状态）时才返回 true
                         value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart
-                    }
+                    },
+                    // 将阈值设为屏幕宽度的 50% 或更高
+                    // 这样用户在滑动过程中，卡片不会“迫不及待”地自己飞走
+                    positionalThreshold = { distance -> distance * 0.5f }
                 )
-                // 放在 SwipeToDismissBox 的上面
-                LaunchedEffect(dismissState.currentValue) {
-                    if (dismissState.currentValue == SwipeToDismissBoxValue.StartToEnd ||
-                        dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+                // 1. 获取当前的像素偏移量
+                val offset = try { dismissState.requireOffset() } catch (e: Exception) { 0f }
+                // 2. 只有当状态已经是“被删除”时，才增加一个巨大的额外位移
+                // 如果向右滑，推向正无穷；向左滑，推向负无穷
+                val extraTranslation = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.StartToEnd -> 2000f // 足够飞出任何手机屏幕
+                    SwipeToDismissBoxValue.EndToStart -> -2000f
+                    else -> 0f
+                }
 
-                        // 这里的一丁点延迟是为了让视觉效果更平滑
-                        delay(150)
+                // 放在 SwipeToDismissBox 的上面
+                // 【关键修复】：监听状态的彻底改变
+                LaunchedEffect(dismissState.currentValue) {
+                    if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                        // 此时用户已经松手，且状态机已经确认要 Dismiss
+                        // 等待默认的“飞出”动画播完
+                        delay(300)
                         todoList.remove(item)
                     }
                 }
@@ -176,19 +186,25 @@ fun TodoInputScreen() {
                     enableDismissFromStartToEnd = true,
                     enableDismissFromEndToStart = true,
                     content = {
-                        // 调用你之前的卡片组件
-                        TodoItemRow(
-                            taskName = item.taskName,
-                            isDone = item.isDone,
-                            shape = cardShape, // 记得你之前定义的圆角
-                            onStatusChange = { checked ->
-                                // 更新勾选状态
-                                val index = todoList.indexOf(item)
-                                if (index != -1) {
-                                    todoList[index] = item.copy(isDone = checked)
+                        // 3. 关键点：使用 graphicsLayer 手动接管最后的位移
+                        Box(
+                            modifier = Modifier.graphicsLayer {
+                                // 当滑动超过阈值开始自动飞出时，extraTranslation 会立刻介入
+                                // 让卡片以极快的速度飞向视野之外
+                                translationX = if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                                    extraTranslation
+                                } else {
+                                    0f
                                 }
                             }
-                        )
+                        ) {
+                            TodoItemRow(
+                                taskName = item.taskName,
+                                isDone = item.isDone,
+                                shape = cardShape,
+                                onStatusChange = { /* ... */ }
+                            )
+                        }
                     }
                 )
             }
