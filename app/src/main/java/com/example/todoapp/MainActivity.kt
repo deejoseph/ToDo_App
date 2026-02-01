@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlinx.coroutines.delay
 import kotlin.math.absoluteValue
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.animation.core.FastOutLinearInEasing
