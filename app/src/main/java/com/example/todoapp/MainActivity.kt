@@ -39,9 +39,10 @@ class MainActivity : ComponentActivity() {
 }
 
 data class TodoItem(
-    val id: Long = System.currentTimeMillis() + (0..9999).random(), // 随机且唯一的ID
+    val id: Long = System.currentTimeMillis() + (0..9999).random(),
     val taskName: String,
-    val isDone: Boolean
+    val isDone: Boolean,
+    val isDeleting: Boolean = false // 新增：标记是否正在执行消失动画
 )
 
 @Composable
@@ -60,8 +61,12 @@ fun TodoInputScreen() {
             text = { Text("确定要删除任务 \"${itemPendingDelete?.taskName}\" 吗？") },
             confirmButton = {
                 TextButton(onClick = {
-                    itemPendingDelete?.let { todoList.remove(it) }
-                    itemPendingDelete = null
+                    // 找到该项并标记为正在删除
+                    val index = todoList.indexOf(itemPendingDelete)
+                    if (index != -1) {
+                        todoList[index] = todoList[index].copy(isDeleting = true)
+                    }
+                    itemPendingDelete = null // 关闭弹窗
                 }) {
                     Text("确定", color = Color.Red)
                 }
@@ -99,40 +104,30 @@ fun TodoInputScreen() {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(items = todoList, key = { it.id }) { item ->
                 val dismissState = rememberSwipeToDismissBoxState(
-                    confirmValueChange = { value ->
-                        // 【关键修改 1】：拦截原生的逻辑删除动作。
-                        // 我们不让 dismissState 自己结算，而是手动控制弹窗。
-                        false
-                    },
+                    confirmValueChange = { false }, // 保持拦截逻辑
                     positionalThreshold = { distance -> distance * 0.6f }
                 )
 
-                // 记录锁定的滑动方向
                 val lockedDirection = remember(dismissState.targetValue) {
                     if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
                         if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f
                     } else null
                 }
 
-                // 判断是否达到了触发阈值
                 val isTargetingDismiss = dismissState.targetValue != SwipeToDismissBoxValue.Settled
                 val isConfirming = itemPendingDelete == item
 
-                // 【关键修改 2】：当 targetValue 达到边界时，主动开启弹窗
-                LaunchedEffect(dismissState.targetValue) {
-                    if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
-                        itemPendingDelete = item
+                // 淡出动画逻辑
+                val finalAlpha by animateFloatAsState(
+                    targetValue = if (item.isDeleting) 0f else 1f,
+                    animationSpec = tween(durationMillis = 500),
+                    label = "FinalFadeOut",
+                    finishedListener = {
+                        if (item.isDeleting) { todoList.remove(item) }
                     }
-                }
+                )
 
-                // 当取消删除时，重置滑动状态
-                LaunchedEffect(itemPendingDelete) {
-                    if (itemPendingDelete == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                        dismissState.reset()
-                    }
-                }
-
-                // 位移动画判定
+                // 位移动画逻辑
                 val extraTranslation by animateFloatAsState(
                     targetValue = if (isConfirming || isTargetingDismiss) {
                         val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f)
@@ -142,38 +137,31 @@ fun TodoInputScreen() {
                     label = "FlyOut"
                 )
 
+                LaunchedEffect(dismissState.targetValue) {
+                    if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                        itemPendingDelete = item
+                    }
+                }
+
+                LaunchedEffect(itemPendingDelete) {
+                    if (itemPendingDelete == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                        dismissState.reset()
+                    }
+                }
+
                 val cardShape = RoundedCornerShape(12.dp)
 
                 SwipeToDismissBox(
                     state = dismissState,
+                    // --- 核心修改：彻底删掉背景内容 ---
                     backgroundContent = {
-                        val offset = try { dismissState.requireOffset().absoluteValue } catch (e: Exception) { 0f }
-                        // 只要有位移或正在确认，背景就显示
-                        val alpha by animateFloatAsState(if (offset > 10f || isConfirming) 0.8f else 0f)
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(vertical = 4.dp)
-                                .clip(cardShape)
-                                .background(Color.Red.copy(alpha = alpha)),
-                            contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
-                                Alignment.CenterStart else Alignment.CenterEnd
-                        ) {
-                            if (offset > 10f || isConfirming) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.padding(horizontal = 24.dp)
-                                )
-                            }
-                        }
+                        // 这里留空，滑动时后面什么都没有
+                        Box(Modifier.fillMaxSize())
                     },
                     content = {
                         Box(
                             modifier = Modifier.graphicsLayer {
-                                // 只要还在动画中，就应用位移
+                                this.alpha = finalAlpha
                                 translationX = if (dismissState.currentValue == SwipeToDismissBoxValue.Settled &&
                                     dismissState.targetValue == SwipeToDismissBoxValue.Settled) 0f else extraTranslation
                             }
@@ -184,7 +172,9 @@ fun TodoInputScreen() {
                                 shape = cardShape,
                                 onStatusChange = { newStatus ->
                                     val index = todoList.indexOf(item)
-                                    if (index != -1) todoList[index] = item.copy(isDone = newStatus)
+                                    if (index != -1) {
+                                        todoList[index] = item.copy(isDone = newStatus)
+                                    }
                                 }
                             )
                         }
