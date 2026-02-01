@@ -48,20 +48,36 @@ data class TodoItem(
 @Composable
 fun TodoInputScreen() {
     var textState by remember { mutableStateOf("") }
-    // 使用 mutableStateListOf，这样当列表改变时，界面会自动刷新
-    // 现在列表里存的是 TodoItem 对象，而不仅仅是字符串
     val todoList = remember { mutableStateListOf<TodoItem>() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // --- 顶部输入区域 ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    // 状态 1：当前正在请求确认删除的任务
+    var itemPendingDelete by remember { mutableStateOf<TodoItem?>(null) }
+
+    // --- 删除确认对话框 ---
+    if (itemPendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { itemPendingDelete = null },
+            title = { Text("确认删除") },
+            text = { Text("确定要删除任务 \"${itemPendingDelete?.taskName}\" 吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    itemPendingDelete?.let { todoList.remove(it) }
+                    itemPendingDelete = null
+                }) {
+                    Text("确定", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { itemPendingDelete = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // --- 顶部输入区域保持不变 ---
+        Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(
                 value = textState,
                 onValueChange = { textState = it },
@@ -69,149 +85,108 @@ fun TodoInputScreen() {
                 modifier = Modifier.weight(1f)
             )
             Spacer(modifier = Modifier.width(8.dp))
-            FilledIconButton(
-                onClick = {
-                    if (textState.isNotBlank()) {
-                        // 创建一个新的 TodoItem 对象并添加
-                        todoList.add(TodoItem(taskName = textState, isDone = false))
-                        textState = "" // 清空输入框
-                    }
-                },
-                modifier = Modifier.size(56.dp)
-            ) {
+            FilledIconButton(onClick = {
+                if (textState.isNotBlank()) {
+                    todoList.add(TodoItem(taskName = textState, isDone = false))
+                    textState = ""
+                }
+            }, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Default.Add, contentDescription = "添加")
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // --- 下方列表区域 ---
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            items(items = todoList, key = { it.id })
-            { item ->
-                // 为每一个 Item 创建独立的状态
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(items = todoList, key = { it.id }) { item ->
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
-                        // 只有当滑动意图非常明确（已经到达目标状态）时才返回 true
-                        value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart
+                        // 【关键修改 1】：拦截原生的逻辑删除动作。
+                        // 我们不让 dismissState 自己结算，而是手动控制弹窗。
+                        false
                     },
-                    // 将阈值设为屏幕宽度的 50% 或更高
-                    // 这样用户在滑动过程中，卡片不会“迫不及待”地自己飞走
-                    positionalThreshold = { distance -> distance * 0.75f }
+                    positionalThreshold = { distance -> distance * 0.6f }
                 )
 
-                // 检测是否已经触发了飞出目标
-                val isDismissed = dismissState.targetValue != SwipeToDismissBoxValue.Settled
+                // 记录锁定的滑动方向
+                val lockedDirection = remember(dismissState.targetValue) {
+                    if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                        if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f
+                    } else null
+                }
 
-                // 2. 只有当状态已经是“被删除”时，才增加一个巨大的额外位移
-                // 如果向右滑，推向正无穷；向左滑，推向负无穷
-                val extraTranslation by animateFloatAsState(
-                    targetValue = if (isDismissed) {
-                        if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) 2000f else -2000f
-                    } else 0f,
-                    animationSpec = tween(
-                        durationMillis = 600, // 适当增加时间（之前默认约 300ms），让过程更清晰
-                        easing = androidx.compose.animation.core.FastOutLinearInEasing // 核心：加速曲线，产生“嗖”一下甩出去的感觉
-                    ),
-                    label = "FlyOutAnimation"
-                )
+                // 判断是否达到了触发阈值
+                val isTargetingDismiss = dismissState.targetValue != SwipeToDismissBoxValue.Settled
+                val isConfirming = itemPendingDelete == item
 
-                // 放在 SwipeToDismissBox 的上面
-                // 【关键修复】：监听状态的彻底改变
-                LaunchedEffect(dismissState.currentValue) {
-                    if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                        // 此时用户已经松手，且状态机已经确认要 Dismiss
-                        // 等待默认的“飞出”动画播完
-                        delay(400)
-                        todoList.remove(item)
+                // 【关键修改 2】：当 targetValue 达到边界时，主动开启弹窗
+                LaunchedEffect(dismissState.targetValue) {
+                    if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                        itemPendingDelete = item
                     }
                 }
 
+                // 当取消删除时，重置滑动状态
+                LaunchedEffect(itemPendingDelete) {
+                    if (itemPendingDelete == null && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                        dismissState.reset()
+                    }
+                }
+
+                // 位移动画判定
+                val extraTranslation by animateFloatAsState(
+                    targetValue = if (isConfirming || isTargetingDismiss) {
+                        val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f)
+                        2000f * dir
+                    } else 0f,
+                    animationSpec = tween(600, easing = FastOutLinearInEasing),
+                    label = "FlyOut"
+                )
+
                 val cardShape = RoundedCornerShape(12.dp)
-                // 2. 滑动包装器
+
                 SwipeToDismissBox(
                     state = dismissState,
                     backgroundContent = {
-                        // 1. 核心修复：使用 requireOffset() 代替 .offset
-                        // 记得导入 kotlin.math.absoluteValue
                         val offset = try { dismissState.requireOffset().absoluteValue } catch (e: Exception) { 0f }
-
-                        val isSwiping = offset > 0.5f
-
-                        // 2. 这里的算法逻辑保持不变
-                        // 滑动 100-150 像素左右就达到满透明度，这样触发非常灵敏
-                        val enhancedAlpha = if (isSwiping) {
-                            (0.2f + (offset / 150f)).coerceIn(0f, 1f)
-                        } else {
-                            0f
-                        }
-
-                        val iconScale = if (isSwiping) {
-                            (0.5f + (enhancedAlpha * 0.6f)).coerceIn(0.5f, 1.1f)
-                        } else {
-                            0f
-                        }
-
-                        // ... 后面的 Box 和 Icon 代码保持不变 ...
-                        val direction = dismissState.dismissDirection
-                        val alignment = when (direction) {
-                            SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                            SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                            else -> Alignment.Center
-                        }
+                        // 只要有位移或正在确认，背景就显示
+                        val alpha by animateFloatAsState(if (offset > 10f || isConfirming) 0.8f else 0f)
 
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(vertical = 4.dp) // 1. 必须与下方 Card 的 vertical padding 一致
-                                .clip(cardShape)           // 2. 裁剪背景，使其拥有和 Card 一样的圆角
-                                .background(Color.Red.copy(alpha = enhancedAlpha * 0.9f)),
-                            contentAlignment = when (direction) {
-                                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                                else -> Alignment.Center
-                            }
+                                .padding(vertical = 4.dp)
+                                .clip(cardShape)
+                                .background(Color.Red.copy(alpha = alpha)),
+                            contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd)
+                                Alignment.CenterStart else Alignment.CenterEnd
                         ) {
-                            if (isSwiping) {
+                            if (offset > 10f || isConfirming) {
                                 Icon(
-                                    imageVector = Icons.Default.Delete,
+                                    Icons.Default.Delete,
                                     contentDescription = null,
-                                    tint = Color.White.copy(alpha = enhancedAlpha),
-                                    modifier = Modifier
-                                        .padding(horizontal = 24.dp)
-                                        .graphicsLayer {
-                                            val scale = (0.5f + (enhancedAlpha * 0.6f)).coerceIn(0.5f, 1.1f)
-                                            scaleX = scale
-                                            scaleY = scale
-                                        }
+                                    tint = Color.White,
+                                    modifier = Modifier.padding(horizontal = 24.dp)
                                 )
                             }
                         }
                     },
-                    // 关键修改：允许从左向右滑动
-                    enableDismissFromStartToEnd = true,
-                    enableDismissFromEndToStart = true,
                     content = {
-                        // 3. 关键点：使用 graphicsLayer 手动接管最后的位移
                         Box(
                             modifier = Modifier.graphicsLayer {
-                                // 当滑动超过阈值开始自动飞出时，extraTranslation 会立刻介入
-                                // 让卡片以极快的速度飞向视野之外
-                                translationX = if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
-                                    extraTranslation
-                                } else {
-                                    0f
-                                }
+                                // 只要还在动画中，就应用位移
+                                translationX = if (dismissState.currentValue == SwipeToDismissBoxValue.Settled &&
+                                    dismissState.targetValue == SwipeToDismissBoxValue.Settled) 0f else extraTranslation
                             }
                         ) {
                             TodoItemRow(
                                 taskName = item.taskName,
                                 isDone = item.isDone,
                                 shape = cardShape,
-                                onStatusChange = { /* ... */ }
+                                onStatusChange = { newStatus ->
+                                    val index = todoList.indexOf(item)
+                                    if (index != -1) todoList[index] = item.copy(isDone = newStatus)
+                                }
                             )
                         }
                     }
