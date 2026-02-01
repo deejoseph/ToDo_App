@@ -96,15 +96,20 @@ fun TodoInputScreen() {
                 // 为每一个 Item 创建独立的状态
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
-                        if (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart) {
-                            // 【关键修复 2】直接在这里删除，利用 Compose 的自动动画
-                            todoList.remove(item)
-                            true
-                        } else {
-                            false
-                        }
+                        // 只要滑动到了两端，就返回 true，这会触发“滑到底”的动画
+                        value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart
                     }
                 )
+                // 放在 SwipeToDismissBox 的上面
+                LaunchedEffect(dismissState.currentValue) {
+                    if (dismissState.currentValue == SwipeToDismissBoxValue.StartToEnd ||
+                        dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+
+                        // 这里的一丁点延迟是为了让视觉效果更平滑
+                        delay(150)
+                        todoList.remove(item)
+                    }
+                }
 
                 val cardShape = RoundedCornerShape(12.dp)
                 // 2. 滑动包装器
