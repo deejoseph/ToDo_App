@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.absoluteValue
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,20 +100,28 @@ fun TodoInputScreen() {
                 SwipeToDismissBox(
                     state = dismissState,
                     backgroundContent = {
-                        // 1. 获取滑动的进度和方向
-                        val direction = dismissState.dismissDirection
-                        val targetValue = dismissState.targetValue
+                        // 1. 核心修复：使用 requireOffset() 代替 .offset
+                        // 记得导入 kotlin.math.absoluteValue
+                        val offset = try { dismissState.requireOffset().absoluteValue } catch (e: Exception) { 0f }
 
-                        // 2. 核心修复：只有当目标状态不再是 Settled（静止）或者确实有方向偏移时，才显示颜色
-                        // 或者判断 dismissState.progress > 0f (部分版本适用)
-                        val isSwiping = targetValue != SwipeToDismissBoxValue.Settled
+                        val isSwiping = offset > 0.5f
 
-                        val color = if (isSwiping) {
-                            Color.Red.copy(alpha = 0.8f)
+                        // 2. 这里的算法逻辑保持不变
+                        // 滑动 100-150 像素左右就达到满透明度，这样触发非常灵敏
+                        val enhancedAlpha = if (isSwiping) {
+                            (0.2f + (offset / 150f)).coerceIn(0f, 1f)
                         } else {
-                            Color.Transparent // 静止状态下背景透明
+                            0f
                         }
 
+                        val iconScale = if (isSwiping) {
+                            (0.5f + (enhancedAlpha * 0.6f)).coerceIn(0.5f, 1.1f)
+                        } else {
+                            0f
+                        }
+
+                        // ... 后面的 Box 和 Icon 代码保持不变 ...
+                        val direction = dismissState.dismissDirection
                         val alignment = when (direction) {
                             SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
                             SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
@@ -121,16 +131,19 @@ fun TodoInputScreen() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(color)
-                                .padding(horizontal = 20.dp),
+                                .background(Color.Red.copy(alpha = enhancedAlpha * 0.9f))
+                                .padding(horizontal = 24.dp),
                             contentAlignment = alignment
                         ) {
-                            // 只有在真正滑动时才显示图标
                             if (isSwiping) {
                                 Icon(
-                                    Icons.Default.Delete,
+                                    imageVector = Icons.Default.Delete,
                                     contentDescription = "删除",
-                                    tint = Color.White
+                                    tint = Color.White.copy(alpha = enhancedAlpha),
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = iconScale
+                                        scaleY = iconScale
+                                    }
                                 )
                             }
                         }
