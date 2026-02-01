@@ -3,6 +3,8 @@ package com.example.todoapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,7 +25,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 import kotlin.math.absoluteValue
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.FastOutLinearInEasing
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,17 +100,24 @@ fun TodoInputScreen() {
                     },
                     // 将阈值设为屏幕宽度的 50% 或更高
                     // 这样用户在滑动过程中，卡片不会“迫不及待”地自己飞走
-                    positionalThreshold = { distance -> distance * 0.5f }
+                    positionalThreshold = { distance -> distance * 0.75f }
                 )
-                // 1. 获取当前的像素偏移量
-                val offset = try { dismissState.requireOffset() } catch (e: Exception) { 0f }
+
+                // 检测是否已经触发了飞出目标
+                val isDismissed = dismissState.targetValue != SwipeToDismissBoxValue.Settled
+
                 // 2. 只有当状态已经是“被删除”时，才增加一个巨大的额外位移
                 // 如果向右滑，推向正无穷；向左滑，推向负无穷
-                val extraTranslation = when (dismissState.targetValue) {
-                    SwipeToDismissBoxValue.StartToEnd -> 2000f // 足够飞出任何手机屏幕
-                    SwipeToDismissBoxValue.EndToStart -> -2000f
-                    else -> 0f
-                }
+                val extraTranslation by animateFloatAsState(
+                    targetValue = if (isDismissed) {
+                        if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) 2000f else -2000f
+                    } else 0f,
+                    animationSpec = tween(
+                        durationMillis = 600, // 适当增加时间（之前默认约 300ms），让过程更清晰
+                        easing = androidx.compose.animation.core.FastOutLinearInEasing // 核心：加速曲线，产生“嗖”一下甩出去的感觉
+                    ),
+                    label = "FlyOutAnimation"
+                )
 
                 // 放在 SwipeToDismissBox 的上面
                 // 【关键修复】：监听状态的彻底改变
@@ -116,7 +125,7 @@ fun TodoInputScreen() {
                     if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
                         // 此时用户已经松手，且状态机已经确认要 Dismiss
                         // 等待默认的“飞出”动画播完
-                        delay(300)
+                        delay(400)
                         todoList.remove(item)
                     }
                 }
