@@ -83,9 +83,11 @@ fun TodoInputScreen() {
                 // 1. 定义滑动状态
                 val dismissState = rememberSwipeToDismissBoxState(
                     confirmValueChange = { value ->
-                        if (value == SwipeToDismissBoxValue.EndToStart) {
-                            todoList.remove(todoPair) // 侧滑到底后删除数据
-                            true
+                        // 核心修复：必须同时允许这两个值
+                        if (value == SwipeToDismissBoxValue.StartToEnd ||
+                            value == SwipeToDismissBoxValue.EndToStart) {
+                            todoList.remove(todoPair)
+                            true // 返回 true 表示确认删除，不再弹回
                         } else {
                             false
                         }
@@ -96,26 +98,47 @@ fun TodoInputScreen() {
                 SwipeToDismissBox(
                     state = dismissState,
                     backgroundContent = {
-                        // 滑动时露出的背景
-                        val color = if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                        // 1. 获取滑动的进度和方向
+                        val direction = dismissState.dismissDirection
+                        val targetValue = dismissState.targetValue
+
+                        // 2. 核心修复：只有当目标状态不再是 Settled（静止）或者确实有方向偏移时，才显示颜色
+                        // 或者判断 dismissState.progress > 0f (部分版本适用)
+                        val isSwiping = targetValue != SwipeToDismissBoxValue.Settled
+
+                        val color = if (isSwiping) {
                             Color.Red.copy(alpha = 0.8f)
-                        } else Color.Transparent
+                        } else {
+                            Color.Transparent // 静止状态下背景透明
+                        }
+
+                        val alignment = when (direction) {
+                            SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                            SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                            else -> Alignment.Center
+                        }
 
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(color)
                                 .padding(horizontal = 20.dp),
-                            contentAlignment = Alignment.CenterEnd
+                            contentAlignment = alignment
                         ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "删除",
-                                tint = Color.White
-                            )
+                            // 只有在真正滑动时才显示图标
+                            if (isSwiping) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "删除",
+                                    tint = Color.White
+                                )
+                            }
                         }
                     },
-                    enableDismissFromStartToEnd = false, // 只允许从右往左滑
+                    // 关键修改：允许从左向右滑动
+                    enableDismissFromStartToEnd = true,
+                    // 允许从右向左滑动
+                    enableDismissFromEndToStart = true,
                     content = {
                         // 之前的任务行 UI
                         TodoItemRow(
