@@ -3,6 +3,8 @@ package com.example.todoapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -18,19 +20,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlin.math.absoluteValue
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.animation.core.FastOutLinearInEasing
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // 使用 Material3 主题容器
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 TodoInputScreen()
             }
@@ -42,15 +40,13 @@ data class TodoItem(
     val id: Long = System.currentTimeMillis() + (0..9999).random(),
     val taskName: String,
     val isDone: Boolean,
-    val isDeleting: Boolean = false // 新增：标记是否正在执行消失动画
+    val isDeleting: Boolean = false
 )
 
 @Composable
 fun TodoInputScreen() {
     var textState by remember { mutableStateOf("") }
     val todoList = remember { mutableStateListOf<TodoItem>() }
-
-    // 状态 1：当前正在请求确认删除的任务
     var itemPendingDelete by remember { mutableStateOf<TodoItem?>(null) }
 
     // --- 删除确认对话框 ---
@@ -61,12 +57,11 @@ fun TodoInputScreen() {
             text = { Text("确定要删除任务 \"${itemPendingDelete?.taskName}\" 吗？") },
             confirmButton = {
                 TextButton(onClick = {
-                    // 找到该项并标记为正在删除
                     val index = todoList.indexOf(itemPendingDelete)
                     if (index != -1) {
                         todoList[index] = todoList[index].copy(isDeleting = true)
                     }
-                    itemPendingDelete = null // 关闭弹窗
+                    itemPendingDelete = null
                 }) {
                     Text("确定", color = Color.Red)
                 }
@@ -80,7 +75,6 @@ fun TodoInputScreen() {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // --- 顶部输入区域保持不变 ---
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(
                 value = textState,
@@ -104,7 +98,7 @@ fun TodoInputScreen() {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(items = todoList, key = { it.id }) { item ->
                 val dismissState = rememberSwipeToDismissBoxState(
-                    confirmValueChange = { false }, // 保持拦截逻辑
+                    confirmValueChange = { false },
                     positionalThreshold = { distance -> distance * 0.6f }
                 )
 
@@ -117,7 +111,6 @@ fun TodoInputScreen() {
                 val isTargetingDismiss = dismissState.targetValue != SwipeToDismissBoxValue.Settled
                 val isConfirming = itemPendingDelete == item
 
-                // 淡出动画逻辑
                 val finalAlpha by animateFloatAsState(
                     targetValue = if (item.isDeleting) 0f else 1f,
                     animationSpec = tween(durationMillis = 500),
@@ -127,10 +120,9 @@ fun TodoInputScreen() {
                     }
                 )
 
-                // 位移动画逻辑
                 val extraTranslation by animateFloatAsState(
                     targetValue = if (isConfirming || isTargetingDismiss) {
-                        val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else 1f)
+                        val dir = lockedDirection ?: (if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) -1f else -1f)
                         2000f * dir
                     } else 0f,
                     animationSpec = tween(600, easing = FastOutLinearInEasing),
@@ -151,48 +143,52 @@ fun TodoInputScreen() {
 
                 val cardShape = RoundedCornerShape(12.dp)
 
-                SwipeToDismissBox(
-                    state = dismissState,
-                    // --- 核心修改：彻底删掉背景内容 ---
-                    backgroundContent = {
-                        // 这里留空，滑动时后面什么都没有
-                        Box(Modifier.fillMaxSize())
-                    },
-                    content = {
-                        Box(
-                            modifier = Modifier.graphicsLayer {
-                                this.alpha = finalAlpha
-                                translationX = if (dismissState.currentValue == SwipeToDismissBoxValue.Settled &&
-                                    dismissState.targetValue == SwipeToDismissBoxValue.Settled) 0f else extraTranslation
-                            }
-                        ) {
-                            TodoItemRow(
-                                taskName = item.taskName,
-                                isDone = item.isDone,
-                                shape = cardShape,
-                                onStatusChange = { newStatus ->
-                                    val index = todoList.indexOf(item)
-                                    if (index != -1) {
-                                        todoList[index] = item.copy(isDone = newStatus)
-                                    }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateItem(
+                            placementSpec = tween(durationMillis = 400),
+                            fadeOutSpec = null
+                        )
+                ) {
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        backgroundContent = { Box(Modifier.fillMaxSize()) },
+                        content = {
+                            Box(
+                                modifier = Modifier.graphicsLayer {
+                                    this.alpha = finalAlpha
+                                    translationX = if (dismissState.currentValue == SwipeToDismissBoxValue.Settled &&
+                                        dismissState.targetValue == SwipeToDismissBoxValue.Settled) 0f else extraTranslation
                                 }
-                            )
+                            ) {
+                                TodoItemRow(
+                                    taskName = item.taskName,
+                                    isDone = item.isDone,
+                                    shape = cardShape,
+                                    onStatusChange = { newStatus ->
+                                        val index = todoList.indexOf(item)
+                                        if (index != -1) {
+                                            todoList[index] = item.copy(isDone = newStatus)
+                                        }
+                                    }
+                                )
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }
 }
 
-// 抽取出来的一个单独的“行”组件
 @Composable
 fun TodoItemRow(taskName: String, isDone: Boolean, shape: Shape, onStatusChange: (Boolean) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp), // 增加上下间距
-        shape = shape, // <--- 确保 Card 使用了传入的 shape
+            .padding(vertical = 4.dp),
+        shape = shape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -203,17 +199,14 @@ fun TodoItemRow(taskName: String, isDone: Boolean, shape: Shape, onStatusChange:
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. 任务文字：放在左边，占据剩余所有空间
             Text(
                 text = taskName,
-                modifier = Modifier.weight(1f), // 核心代码：把 Checkbox 挤到右边去
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    // 如果完成了，给文字加一个中划线效果，看起来更专业
                     textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None
                 )
             )
 
-            // 2. 复选框：现在它会乖乖待在最右边
             Checkbox(
                 checked = isDone,
                 onCheckedChange = { onStatusChange(it) }
